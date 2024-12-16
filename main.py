@@ -18,6 +18,12 @@ def setup_driver():
     driver = uc.Chrome(options=options)
     return driver
 
+def get_session_cookies():
+    # Делаем запрос к главной странице, чтобы получить куки
+    response = requests.get("https://www.farpost.ru/")
+    # Извлекаем куки из ответа
+    cookies = response.cookies
+    return cookies
 
 def search_additional_information_seller(seller_url, seller_info, driver):
     driver.get(seller_url)
@@ -61,8 +67,7 @@ def search_additional_information_seller(seller_url, seller_info, driver):
     pass
 
 
-def search_sellers(product_url, city, driver):
-    seller_info = {}
+def search_sellers(product_url, city, driver, seller_info):
     driver.get(product_url)
     
     while True:
@@ -80,6 +85,8 @@ def search_sellers(product_url, city, driver):
                 breadcrumbs = [crumb.strip() for crumb in breadcrumbs if crumb.strip()]
                 category_path = " / ".join(breadcrumbs)  # Соединяем все элементы через "/"
 
+                data = tree.xpath('//div[contains(@class, "viewbull-actual-date")]//text()')
+                data 
                 # Пробуем найти кнопку первого типа
                 try:
                     contact_button = driver.find_element("css selector", ".viewAjaxContacts.ajaxLink.gtm__btn-contact-view")
@@ -119,16 +126,21 @@ def search_sellers(product_url, city, driver):
                 # Формируем информацию о продавце
                 name_saller = saller[0].text_content()
                 geo_seller = city['name']
+
+                # Сохраняем тип продавца из переданного seller_info
+                seller_type = seller_info.get('type', 'неизвестно')
+                
                 seller_info = {
+                    'type': seller_type,
                     'name': name_saller,
                     'phones': phones,
                     'geo': geo_seller,
+                    'date': [data],
                     'category': [category_path],
-                    'emails': emails
+                    'emails': emails,
                 }
 
                 search_additional_information_seller(f"https://www.farpost.ru{saller[0].get('href')}", seller_info, driver)
-                
                 break
             else:
                 print("Ожидание решения капчи или загрузки элемента...")
@@ -153,7 +165,8 @@ def search_products(city, category_url, category_name, driver):
                 page_source = driver.page_source
                 tree = html.fromstring(page_source)
                 
-                products = tree.xpath('//a[contains(@class, "bulletinLink") and contains(@class, "bull-item__self-link")]')
+                # Находим все карточки товаров
+                products = tree.xpath('//div[contains(@class, "descriptionCell")]')
                 
                 if products:
                     print(f"Город: {city['name']} | Категория: {category_name} | Страница: {page} | Найдено продуктов: {len(products)}")
@@ -161,24 +174,39 @@ def search_products(city, category_url, category_name, driver):
                     if count_sellers_in_category > 0:
                         count_sellers = count_sellers_in_category
                         for product in products:
-                            if count_sellers <= 0:  # Добавляем проверку
+                            if count_sellers <= 0:
                                 return
-                            product_url = product.get('href')
-                            print(f"Город: {city['name']} | Категория: {category_name} | Ссылка: https://www.farpost.ru{product_url}")
-                            search_sellers(f"https://www.farpost.ru{product_url}", city, driver)
-                            count_sellers -= 1
+                            
+                            # Проверяем наличие блока компании
+                            company_block = product.xpath('.//div[contains(@class, "ellipsis-text__left-side")]')
+                            seller_type = "Компания" if company_block else "Частник"
+                            
+                            # Получаем ссылку на товар
+                            product_link = product.xpath('.//a[contains(@class, "bulletinLink") and contains(@class, "bull-item__self-link")]/@href')
+                            if product_link:
+                                product_url = product_link[0]
+                                print(f"Город: {city['name']} | Категория: {category_name} | Ссылка: https://www.farpost.ru{product_url}")
+                                seller_info = {'type': seller_type}  # Передаем тип продавца
+                                search_sellers(f"https://www.farpost.ru{product_url}", city, driver, seller_info)
+                                count_sellers -= 1
                     else:
                         for product in products:
-                            product_url = product.get('href')
-                            print(f"Город: {city['name']} | Категория: {category_name} | Ссылка: https://www.farpost.ru{product_url}")
-                            search_sellers(f"https://www.farpost.ru{product_url}", city, driver)
-                    
+                            # Проверяем наличие блока компании
+                            company_block = product.xpath('.//div[contains(@class, "ellipsis-text__left-side")]')
+                            seller_type = "Компания" if company_block else "Частник"
+                            
+                            # Получаем ссылку на товар
+                            product_link = product.xpath('.//a[contains(@class, "bulletinLink") and contains(@class, "bull-item__self-link")]/@href')
+                            if product_link:
+                                product_url = product_link[0]
+                                print(f"Город: {city['name']} | Категория: {category_name} | Ссылка: https://www.farpost.ru{product_url}")
+                                seller_info = {'type': seller_type}  # Передаем тип продавца
+                                search_sellers(f"https://www.farpost.ru{product_url}", city, driver, seller_info)
 
                     page += 1
                     break
                     
                 else:
-                        
                     print("Ожидание решения капчи или загрузки элементов...")
                     time.sleep(5)
                     
@@ -200,6 +228,8 @@ def search_category(city_links):
                 categories = tree.xpath('//a[contains(@class, "option")]')
                 
                 for category in categories:
+                    if category.text_content().strip() == "Спецтехника":
+                        continue
                     category_url = category.get('href')
                     category_name = category.text_content().strip()
                     time.sleep(2)
@@ -210,8 +240,10 @@ def search_category(city_links):
 
 
 def search_city():
+    # Используем куки в запросе
+    session_cookies = get_session_cookies()
     url = "https://www.farpost.ru/geo/nav/city?ajax=1"
-    response = requests.get(url)
+    response = requests.get(url, cookies=session_cookies)
     if response.status_code == 200:
         tree = html.fromstring(response.text)
         # Используем xpath для поиска всех ссылок внутри нужных блоков
@@ -252,6 +284,7 @@ def save_seller_to_json(seller_info):
             # Обновляем информацию существующего продавца
             existing_seller['phones'] = list(set(existing_seller['phones'] + seller_info['phones']))
             existing_seller['emails'] = list(set(existing_seller['emails'] + seller_info['emails']))
+            existing_seller['date'] = list(set(existing_seller['date'] + seller_info['date']))
             # Объединяем категории без дубликатов
             if 'category' in existing_seller and 'category' in seller_info:
                 existing_seller['category'] = list(set(existing_seller['category'] + seller_info['category']))
