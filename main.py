@@ -191,7 +191,7 @@ def search_products(city, category_url, category_name, driver):
                                 count_sellers -= 1
                     else:
                         for product in products:
-                            # Проверяем наличие блока компании
+                            # Проверяем наличи�� блока компании
                             company_block = product.xpath('.//div[contains(@class, "ellipsis-text__left-side")]')
                             seller_type = "Компания" if company_block else "Частник"
                             
@@ -281,15 +281,21 @@ def save_seller_to_json(seller_info):
     seller_exists = False
     for existing_seller in sellers:
         if existing_seller['name'] == seller_info['name']:
-            # Обновляем информацию существующего продавца
+            # Обновляем телефоны и emails через множества
             existing_seller['phones'] = list(set(existing_seller['phones'] + seller_info['phones']))
             existing_seller['emails'] = list(set(existing_seller['emails'] + seller_info['emails']))
-            existing_seller['date'] = list(set(existing_seller['date'] + seller_info['date']))
-            # Объединяем категории без дубликатов
+            
+            # Для date и category используем простое объединение списков с последующим удалением дубликатов
+            if 'date' in existing_seller and 'date' in seller_info:
+                combined_dates = existing_seller['date'] + seller_info['date']
+                existing_seller['date'] = list(dict.fromkeys(combined_dates))
+            
             if 'category' in existing_seller and 'category' in seller_info:
-                existing_seller['category'] = list(set(existing_seller['category'] + seller_info['category']))
+                combined_categories = existing_seller['category'] + seller_info['category']
+                existing_seller['category'] = list(dict.fromkeys(combined_categories))
             elif 'category' in seller_info:
                 existing_seller['category'] = seller_info['category']
+                
             seller_exists = True
             break
 
